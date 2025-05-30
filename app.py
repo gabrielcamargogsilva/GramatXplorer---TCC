@@ -170,6 +170,7 @@ def gerar_texto_com_erros():
         "Não corrija nem explique os erros. Apenas gere o texto com os desvios inseridos."
         "O texto deve ser informal, como se fosse uma conversa entre amigos. "
         "Não use palavras difíceis ou jargões técnicos. "
+        "Retorne somente o texto com erros, sem mensagem ao usuário no final"
     )
 
     resposta, status = chamar_groq(prompt, "Você é um professor gerando textos com erros para correção de alunos.")
