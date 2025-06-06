@@ -69,13 +69,14 @@ def gerar_pergunta():
 
     ### Lógica de Retentativa
 
-    max_tentativas = 5  # Limite de tentativas para evitar loops infinitos
+    max_tentativas = 5  
     tentativas = 0
     pergunta_valida = False
     
     pergunta_texto = "Pergunta não encontrada"
     alternativas = {}
     letra_resposta = ""
+    subtema_texto = "" 
     explicacao_texto = ""
 
     while not pergunta_valida and tentativas < max_tentativas:
@@ -85,10 +86,12 @@ def gerar_pergunta():
             "Crie uma questão de gramática contextualizada, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta. "
             f"A questão deve abordar conteúdos como: {tema_para_prompt} " 
             "Contextualize com uma frase ou pequeno trecho. "
-            "Retorne a explicação de forma extremamente resumida e **garanta que a explicação contenha apenas a justificativa da resposta, sem repetir a pergunta ou as alternativas.**\n" # Instrução mais clara!
+            "Retorne a explicação de forma extremamente resumida e garanta que a explicação contenha apenas a justificativa da resposta, sem repetir a pergunta ou as alternativas.\n" 
             "Formato:\n\n"
             "Pergunta: ...\n"
-            "A) ...\nB) ...\nC) ...\nD) ...\nResposta correta: ...\nExplicação: ..."
+            "A) ...\nB) ...\nC) ...\nD) ...\nResposta correta: ...\n"
+            "Subtema: [O subtema específico da pergunta, por exemplo: Sujeito, Objeto Direto, Atos de Fala, Radical, Afixos, etc.]\n" # Instrução mais detalhada para o subtema
+            "Explicação: ..."
             "Retorne sempre a resposta correta." 
         )
 
@@ -110,18 +113,34 @@ def gerar_pergunta():
         resposta_match = re.search(r"Resposta correta:\s*([ABCD])", resposta_groq)
         letra_resposta = resposta_match.group(1).strip() if resposta_match else ""
 
+        # --- Extrair Subtema com mais precisão ---
+        # A regex deve ser o mais precisa possível para capturar APENAS o subtema
+        subtema_match = re.search(r"Subtema:\s*(.*?)(?=\nExplicação:|\Z)", resposta_groq)
+        subtema_texto = subtema_match.group(1).strip() if subtema_match else ""
+        
+        # Opcional: Limpar o subtema de possíveis ruídos, se a IA ainda incluir.
+        # Por exemplo, se a IA retornar "Subtema: Sujeito (tipos)", e você quiser apenas "Sujeito"
+        # subtema_texto = re.sub(r'\s*\(.*\)', '', subtema_texto).strip()
+
         # Extrair explicação com regex mais preciso (não-guloso)
         explicacao_match = re.search(r"Explicação:\s*(.*?)(?=\n\n|\Z)", resposta_groq, re.DOTALL)
         explicacao_texto = explicacao_match.group(1).strip() if explicacao_match else ""
         
-        # Manter a remoção da frase "A resposta correta é...", caso a IA ainda inclua
         explicacao_texto = re.sub(r"A resposta correta é [ABCD]\).*", "", explicacao_texto).strip()
 
-        # --- Validação da Pergunta ---
-        if pergunta_texto and 'D' in alternativas and len(alternativas) == 4 and letra_resposta:
+        # --- Validação da Pergunta ATUALIZADA para garantir que o subtema não está vazio ---
+        if pergunta_texto and 'D' in alternativas and len(alternativas) == 4 and letra_resposta and subtema_texto:
             pergunta_valida = True
         else:
-            print(f"Tentativa {tentativas + 1} falhou: Pergunta '{pergunta_texto}', Alternativas {list(alternativas.keys())}, Resposta Correta '{letra_resposta}'. Retentando...")
+            # Melhorar a mensagem de log para indicar o que faltou, incluindo o subtema
+            faltantes = []
+            if not pergunta_texto: faltantes.append("Pergunta")
+            if 'D' not in alternativas or len(alternativas) != 4: faltantes.append("Alternativas (A,B,C,D)")
+            if not letra_resposta: faltantes.append("Resposta Correta")
+            if not subtema_texto: faltantes.append("Subtema")
+            
+            print(f"Tentativa {tentativas + 1} falhou. Faltantes: {', '.join(faltantes)}. Resposta bruta da IA (trecho): \n---\n{resposta_groq[:300]}...\n---\nRetentando...")
+            
             tentativas += 1
             
     if not pergunta_valida:
@@ -137,8 +156,10 @@ def gerar_pergunta():
         "pergunta": pergunta_texto,
         "alternativas": alternativas,
         "resposta": letra_resposta,
+        "subtema": subtema_texto, 
         "explicacao": explicacao_texto
     }), 200
+
 
 
 @app.route('/vialactea/verificar', methods=['POST'])
