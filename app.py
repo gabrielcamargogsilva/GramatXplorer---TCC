@@ -26,7 +26,7 @@ def chamar_groq(mensagem_user, mensagem_sistema=""):
     }
 
     body = {
-        "model": "llama-3.1-8b-instant", # Mantido o modelo que você especificou
+        "model": "llama-3.1-8b-instant", 
         "messages": [
             {"role": "system", "content": mensagem_sistema},
             {"role": "user", "content": mensagem_user}
@@ -57,20 +57,15 @@ def gerar_pergunta():
         'morfologia': "Morfologia, com foco em **Radical, Afixos (prefixos e sufixos), Vogal Temática e Desinências** na formação e flexão das palavras. Pergunte sobre a estrutura das palavras ou sua classificação morfológica.",
     }
 
-    # Garante que tema_para_prompt seja inicializado
     tema_para_prompt = "" 
     if tema_solicitado and tema_solicitado in temas_disponiveis:
         tema_para_prompt = temas_disponiveis[tema_solicitado]
-    # Se o tema não for válido ou não for fornecido, tema_para_prompt permanecerá vazio,
-    # o que fará com que o prompt da IA não inclua um tema específico, gerando uma pergunta mais geral.
-
+    
     contexto_dificuldade = {
         'facil': "Elabore a pergunta com vocabulário mais simples, com foco em conteúdos básicos e exemplos acessíveis.",
         'medio': "Use nível intermediário de complexidade, com exemplos contextualizados e exigência razoável de análise.",
         'dificil': "Inclua maior profundidade e complexidade na pergunta, exigindo maior domínio das regras gramaticais e interpretação sutil."
     }
-
-    
 
     ### Lógica de Retentativa
 
@@ -78,7 +73,6 @@ def gerar_pergunta():
     tentativas = 0
     pergunta_valida = False
     
-    # Variáveis para armazenar os dados da pergunta válida
     pergunta_texto = "Pergunta não encontrada"
     alternativas = {}
     letra_resposta = ""
@@ -91,19 +85,18 @@ def gerar_pergunta():
             "Crie uma questão de gramática contextualizada, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta. "
             f"A questão deve abordar conteúdos como: {tema_para_prompt} " 
             "Contextualize com uma frase ou pequeno trecho. "
-            "Retorne a explicação de forma extremamente resumida."
+            "Retorne a explicação de forma extremamente resumida e **garanta que a explicação contenha apenas a justificativa da resposta, sem repetir a pergunta ou as alternativas.**\n" # Instrução mais clara!
             "Formato:\n\n"
             "Pergunta: ...\n"
             "A) ...\nB) ...\nC) ...\nD) ...\nResposta correta: ...\nExplicação: ..."
-            "Retorne sempre a resposta correta." # Reforça a instrução para a IA
+            "Retorne sempre a resposta correta." 
         )
 
         resposta_groq, status = chamar_groq(prompt, "Você é um professor de português criando quiz de múltipla escolha.")
         
         if not resposta_groq:
-            # Se a chamada à Groq falhar (e retornar None), paramos as tentativas
             print(f"Erro na chamada da Groq na tentativa {tentativas + 1}.")
-            break # Sai do loop while
+            break 
 
         # Extrair pergunta
         pergunta_match = re.search(r"Pergunta:\s*(.*?)(?=\nA\))", resposta_groq, re.DOTALL)
@@ -117,25 +110,23 @@ def gerar_pergunta():
         resposta_match = re.search(r"Resposta correta:\s*([ABCD])", resposta_groq)
         letra_resposta = resposta_match.group(1).strip() if resposta_match else ""
 
-        # Extrair explicação
-        explicacao_match = re.search(r"Explicação:\s*(.*)", resposta_groq, re.DOTALL)
+        # Extrair explicação com regex mais preciso (não-guloso)
+        explicacao_match = re.search(r"Explicação:\s*(.*?)(?=\n\n|\Z)", resposta_groq, re.DOTALL)
         explicacao_texto = explicacao_match.group(1).strip() if explicacao_match else ""
+        
+        # Manter a remoção da frase "A resposta correta é...", caso a IA ainda inclua
         explicacao_texto = re.sub(r"A resposta correta é [ABCD]\).*", "", explicacao_texto).strip()
 
         # --- Validação da Pergunta ---
-        # A pergunta é válida se tiver: texto da pergunta, 4 alternativas (incluindo D), e uma resposta correta
         if pergunta_texto and 'D' in alternativas and len(alternativas) == 4 and letra_resposta:
             pergunta_valida = True
         else:
             print(f"Tentativa {tentativas + 1} falhou: Pergunta '{pergunta_texto}', Alternativas {list(alternativas.keys())}, Resposta Correta '{letra_resposta}'. Retentando...")
             tentativas += 1
             
-    # Se depois de todas as tentativas a pergunta ainda não for válida
     if not pergunta_valida:
         return jsonify({"erro": "Não foi possível gerar uma pergunta válida após múltiplas tentativas. Tente novamente."}), 500
 
-    # Garantir que todas as alternativas estejam presentes, caso a Groq retorne algo inesperado
-    # (Embora o loop de retentativa já ajude bastante, esta é uma última garantia)
     for letra in ['A', 'B', 'C', 'D']:
         if letra not in alternativas:
             alternativas[letra] = "[alternativa não fornecida]"
@@ -148,6 +139,7 @@ def gerar_pergunta():
         "resposta": letra_resposta,
         "explicacao": explicacao_texto
     }), 200
+
 
 @app.route('/vialactea/verificar', methods=['POST'])
 def verificar_resposta():
