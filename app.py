@@ -26,7 +26,7 @@ def chamar_groq(mensagem_user, mensagem_sistema=""):
     }
 
     body = {
-        "model": "llama-3.1-8b-instant",
+        "model": "llama-3.1-8b-instant", # Mantido o modelo que você especificou
         "messages": [
             {"role": "system", "content": mensagem_sistema},
             {"role": "user", "content": mensagem_user}
@@ -34,35 +34,35 @@ def chamar_groq(mensagem_user, mensagem_sistema=""):
         "temperature": 0.7,
     }
 
-    response = requests.post(GROQ_URL, headers=headers, json=body)
-    if response.status_code != 200:
-        return None, response.status_code
-
-    resposta = response.json()
-    return resposta['choices'][0]['message']['content'].strip(), 200
-
-
+    try:
+        response = requests.post(GROQ_URL, headers=headers, json=body)
+        response.raise_for_status() # Isso levantará um erro HTTP para status codes 4xx/5xx
+        resposta = response.json()
+        return resposta['choices'][0]['message']['content'].strip(), 200
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao chamar Groq API: {e}")
+        return None, 500 # Retorna None e um status de erro em caso de falha
 
 @app.route('/vialactea/pergunta', methods=['GET'])
 def gerar_pergunta():
     nivel = request.args.get('nivel', 'médio').lower()
-    # 1. Obter o tema solicitado ANTES de usá-lo na lógica
     tema_solicitado = request.args.get('tema', '').lower()
 
     if nivel not in ['facil', 'medio', 'dificil']:
         return jsonify({"erro": "Nível inválido. Use: fácil, médio ou difícil."}), 400
 
-    # 2. Definir o dicionário de temas DISPONÍVEIS
     temas_disponiveis = {
         'sintaxe': 'Sintaxe, com foco em **Sujeito e Predicado** (tipos, concordância), e **Objetos Direto e Indireto** (diferenciação, uso da preposição). Inclua exemplos práticos para identificar essas funções.',
         'pragmatica': "Pragmática, abordando principalmente **Atos de Fala** (diretos/indiretos), **Ironia e Humor** (como são construídos), **Regras de cortesia**, **Pressuposição**, **Dêixis** e **Implicatura** (o que se subentende). A questão deve exigir interpretação de contexto.",
         'morfologia': "Morfologia, com foco em **Radical, Afixos (prefixos e sufixos), Vogal Temática e Desinências** na formação e flexão das palavras. Pergunte sobre a estrutura das palavras ou sua classificação morfológica.",
     }
 
-    # 3. Validar o tema solicitado e definir 'tema_para_prompt'
+    # Garante que tema_para_prompt seja inicializado
+    tema_para_prompt = "" 
     if tema_solicitado and tema_solicitado in temas_disponiveis:
         tema_para_prompt = temas_disponiveis[tema_solicitado]
-    
+    # Se o tema não for válido ou não for fornecido, tema_para_prompt permanecerá vazio,
+    # o que fará com que o prompt da IA não inclua um tema específico, gerando uma pergunta mais geral.
 
     contexto_dificuldade = {
         'facil': "Elabore a pergunta com vocabulário mais simples, com foco em conteúdos básicos e exemplos acessíveis.",
@@ -70,45 +70,75 @@ def gerar_pergunta():
         'dificil': "Inclua maior profundidade e complexidade na pergunta, exigindo maior domínio das regras gramaticais e interpretação sutil."
     }
 
-    prompt = (
-        f"{contexto_dificuldade[nivel]}\n\n"
-        "Você é um professor experiente de Língua Portuguesa voltado para o ensino médio. "
-        "Crie uma questão de gramática contextualizada, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta. "
-        f"A questão deve abordar conteúdos como: {tema_para_prompt} " # Agora usa a variável definida corretamente
-        "Contextualize com uma frase ou pequeno trecho. "
-        "Retorne a explicação de forma extremamente resumida"
-        "Formato:\n\n"
-        "Pergunta: ...\n"
-        "A) ...\nB) ...\nC) ...\nD) ...\nResposta correta: ...\nExplicação: ..."
-    )
+    
 
-    resposta, status = chamar_groq(prompt, "Você é um professor de português criando quiz de múltipla escolha.")
-    if not resposta:
-        return jsonify({"erro": "Erro ao gerar pergunta"}), status
+    ### Lógica de Retentativa
 
-    # Extrair pergunta
-    pergunta_match = re.search(r"Pergunta:\s*(.*?)(?=\nA\))", resposta, re.DOTALL)
-    pergunta_texto = pergunta_match.group(1).strip() if pergunta_match else "Pergunta não encontrada"
+    max_tentativas = 5  # Limite de tentativas para evitar loops infinitos
+    tentativas = 0
+    pergunta_valida = False
+    
+    # Variáveis para armazenar os dados da pergunta válida
+    pergunta_texto = "Pergunta não encontrada"
+    alternativas = {}
+    letra_resposta = ""
+    explicacao_texto = ""
 
-    # Extrair alternativas
-    alternativas_match = re.findall(r"([ABCD])\)\s*(.*?)\n(?=[A-D]\)|Resposta correta:)", resposta, re.DOTALL)
-    alternativas = {letra: texto.strip() for letra, texto in alternativas_match}
+    while not pergunta_valida and tentativas < max_tentativas:
+        prompt = (
+            f"{contexto_dificuldade[nivel]}\n\n"
+            "Você é um professor experiente de Língua Portuguesa voltado para o ensino médio. "
+            "Crie uma questão de gramática contextualizada, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta. "
+            f"A questão deve abordar conteúdos como: {tema_para_prompt} " 
+            "Contextualize com uma frase ou pequeno trecho. "
+            "Retorne a explicação de forma extremamente resumida."
+            "Formato:\n\n"
+            "Pergunta: ...\n"
+            "A) ...\nB) ...\nC) ...\nD) ...\nResposta correta: ...\nExplicação: ..."
+            "Retorne sempre a resposta correta." # Reforça a instrução para a IA
+        )
 
-    # Garantir que todas estejam presentes
+        resposta_groq, status = chamar_groq(prompt, "Você é um professor de português criando quiz de múltipla escolha.")
+        
+        if not resposta_groq:
+            # Se a chamada à Groq falhar (e retornar None), paramos as tentativas
+            print(f"Erro na chamada da Groq na tentativa {tentativas + 1}.")
+            break # Sai do loop while
+
+        # Extrair pergunta
+        pergunta_match = re.search(r"Pergunta:\s*(.*?)(?=\nA\))", resposta_groq, re.DOTALL)
+        pergunta_texto = pergunta_match.group(1).strip() if pergunta_match else ""
+
+        # Extrair alternativas
+        alternativas_match = re.findall(r"([ABCD])\)\s*(.*?)\n(?=[A-D]\)|Resposta correta:)", resposta_groq, re.DOTALL)
+        alternativas = {letra: texto.strip() for letra, texto in alternativas_match}
+
+        # Extrair letra da resposta correta
+        resposta_match = re.search(r"Resposta correta:\s*([ABCD])", resposta_groq)
+        letra_resposta = resposta_match.group(1).strip() if resposta_match else ""
+
+        # Extrair explicação
+        explicacao_match = re.search(r"Explicação:\s*(.*)", resposta_groq, re.DOTALL)
+        explicacao_texto = explicacao_match.group(1).strip() if explicacao_match else ""
+        explicacao_texto = re.sub(r"A resposta correta é [ABCD]\).*", "", explicacao_texto).strip()
+
+        # --- Validação da Pergunta ---
+        # A pergunta é válida se tiver: texto da pergunta, 4 alternativas (incluindo D), e uma resposta correta
+        if pergunta_texto and 'D' in alternativas and len(alternativas) == 4 and letra_resposta:
+            pergunta_valida = True
+        else:
+            print(f"Tentativa {tentativas + 1} falhou: Pergunta '{pergunta_texto}', Alternativas {list(alternativas.keys())}, Resposta Correta '{letra_resposta}'. Retentando...")
+            tentativas += 1
+            
+    # Se depois de todas as tentativas a pergunta ainda não for válida
+    if not pergunta_valida:
+        return jsonify({"erro": "Não foi possível gerar uma pergunta válida após múltiplas tentativas. Tente novamente."}), 500
+
+    # Garantir que todas as alternativas estejam presentes, caso a Groq retorne algo inesperado
+    # (Embora o loop de retentativa já ajude bastante, esta é uma última garantia)
     for letra in ['A', 'B', 'C', 'D']:
         if letra not in alternativas:
             alternativas[letra] = "[alternativa não fornecida]"
-
-    # Extrair letra da resposta correta
-    resposta_match = re.search(r"Resposta correta:\s*([ABCD])", resposta)
-    letra_resposta = resposta_match.group(1).strip() if resposta_match else ""
-
-    # Extrair explicação após "Explicação:"
-    explicacao_match = re.search(r"Explicação:\s*(.*)", resposta, re.DOTALL)
-    explicacao_texto = explicacao_match.group(1).strip() if explicacao_match else ""
-
-    # Remover a frase "A resposta correta é..." da explicação
-    explicacao_texto = re.sub(r"A resposta correta é [ABCD]\).*", "", explicacao_texto).strip()
 
     return jsonify({
         "nivel": nivel,
