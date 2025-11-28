@@ -29,16 +29,55 @@ def gerar_perguntas():
         return jsonify({"erro": "Tema inválido. Temas disponíveis: " + ', '.join(temas_disponiveis.keys())}), 400
 
     prompt = (
-        f"Você é um professor experiente de Língua Portuguesa voltado para o ensino médio. "
-        f"Crie {num_perguntas} questões de gramática contextualizadas, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta. Tem que ser exatamente {num_perguntas} perguntas geradas, não pode ser mais e nem menos."
-        f"A dificuldade deve ser de nível '{nivel}'. {contexto_dificuldade[nivel]} "
-        f"As questões devem abordar conteúdos como: {tema_para_prompt} "
-        "Para cada questão, forneça o subtema específico e uma explicação concisa e direta, focada apenas na justificativa da resposta. "
-        "Retorne a resposta em um formato JSON, sendo um array de objetos. "
-        "Não inclua qualquer texto antes ou depois do JSON. "
-        # ... (Estrutura do JSON no prompt, como no código original) ...
-        # (O restante do prompt foi omitido aqui para brevidade, mas deve ser o original)
-    )
+    # ===================================================================
+    # 1. INSTRUÇÃO DE FORMATO (Movemos para cima para priorizar a saída)
+    # ===================================================================
+    "Sua única resposta deve ser um array JSON contendo exatamente "
+    f"{num_perguntas} objetos de questão. Não inclua qualquer texto, "
+    "explicações, ou ```json antes ou depois do array."
+    
+    # ===================================================================
+    # 2. INSTRUÇÃO DE PERSONALIDADE E CONTEÚDO
+    # ===================================================================
+    f"Você é um professor experiente de Língua Portuguesa voltado para o ensino médio. "
+    f"Crie questões de gramática contextualizadas, de múltipla escolha, com 4 alternativas (A, B, C, D), sendo apenas uma correta."
+    f"A dificuldade deve ser de nível '{nivel}'. {contexto_dificuldade[nivel]} "
+    f"As questões devem abordar conteúdos como: {tema_para_prompt} "
+    
+    # ===================================================================
+    # 3. INSTRUÇÃO DE CAMPOS NECESSÁRIOS
+    # ===================================================================
+    "Para cada questão, forneça OBRIGATORIAMENTE os seguintes campos: "
+    "1. 'id' (número sequencial, começando em 1). "
+    "2. 'pergunta' (a questão completa). "
+    "3. 'alternativas' (UM OBJETO JSON contendo chaves A, B, C, D). "
+    "4. 'resposta' (a chave correta, ex: 'A', 'B', 'C' ou 'D'). "
+    "5. 'subtema' (o tópico gramatical específico). "
+    "6. 'explicacao' (uma justificativa concisa e direta da resposta correta). "
+    
+    # ===================================================================
+    # 4. EXEMPLO DE ESTRUTURA JSON (Crucial para guiar o LLM)
+    # ===================================================================
+    "Siga rigorosamente este formato JSON:"
+    """
+    [
+        {
+            "id": 1,
+            "pergunta": "Qual é o sujeito da frase: 'O professor distribui os cadernos entre os alunos.'?",
+            "alternativas": {
+                "A": "O professor",
+                "B": "os cadernos",
+                "C": "os alunos",
+                "D": "entre os alunos"
+            },
+            "resposta": "A",
+            "subtema": "Sujeito e Predicado",
+            "explicacao": "O sujeito é a entidade que realiza a ação descrita no verbo. Nesse caso, o sujeito é 'O professor', pois é ele que está realizando a ação de distribuir os cadernos."
+        }
+        // ... mais 11 objetos
+    ]
+    """
+)
 
     # 1. Tenta chamar a IA (Groq)
     resposta_groq, status = chamar_groq(prompt, "Você é um professor de português criando um quiz de múltipla escolha. Retorne as questões em JSON.")
