@@ -92,8 +92,7 @@ def create_app():
 # =========================================================
 # 3. PONTO DE ENTRADA
 # =========================================================
-
+app = create_app()
 if __name__ == '__main__':
-    app = create_app()
     # Execute a aplicação
     app.run()
